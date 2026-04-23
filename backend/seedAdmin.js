@@ -1,30 +1,27 @@
 require('dotenv').config();
 const mongoose = require('mongoose');
-const User = require('./models/User');
+const User     = require('./models/User');
+
+const ADMIN_EMAIL    = 'jigar123@gmail.com';
+const ADMIN_PASSWORD = 'jigar@123';
 
 const seedAdmin = async () => {
   try {
-    const conn = await mongoose.connect(process.env.MONGO_URI);
-    console.log(`MongoDB Connected: ${conn.connection.host}`);
+    await mongoose.connect(process.env.MONGO_URI);
+    console.log('MongoDB connected.');
 
-    // Check if an admin already exists
-    const adminExists = await User.findOne({ email: 'jigar123@gmail.com' });
-
-    if (adminExists) {
-      console.log('Admin user already exists!');
-      process.exit();
+    const exists = await User.findOne({ email: ADMIN_EMAIL });
+    if (exists) {
+      console.log('Admin already exists. Skipping.');
+      process.exit(0);
     }
 
-    await User.create({
-      name: 'Jigar',
-      email: 'jigar123@gmail.com',
-      password: 'jigar@123',
-      role: 'admin'
-    });
+    await User.create({ name: 'Jigar', email: ADMIN_EMAIL, password: ADMIN_PASSWORD, role: 'admin' });
 
-    console.log('Admin user successfully created!');
-    console.log('Email: jigar@gmail.com\nPassword: jigar@0709');
-    process.exit();
+    console.log('Admin created successfully.');
+    console.log(`Email:    ${ADMIN_EMAIL}`);
+    console.log(`Password: ${ADMIN_PASSWORD}`);
+    process.exit(0);
   } catch (error) {
     console.error(`Error: ${error.message}`);
     process.exit(1);

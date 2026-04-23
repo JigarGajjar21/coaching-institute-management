@@ -22,9 +22,15 @@ const Register = () => {
     setIsLoading(true);
 
     try {
-      await api.post('/auth/register', { name, email, password });
+      const response = await api.post('/auth/register', { name, email, password });
+      const { token, role, name: backendName } = response.data;
+
+      localStorage.setItem('token', token);
+      localStorage.setItem('role', role);
+      if (backendName) localStorage.setItem('name', backendName);
+
       setIsSuccess(true);
-      setTimeout(() => navigate('/login'), 1500);
+      setTimeout(() => navigate('/student/dashboard'), 1500);
     } catch (err) {
       setInvalidFields(['name', 'email', 'password']);
       if (!err.response) {
@@ -56,7 +62,7 @@ const Register = () => {
 
         {isSuccess ? (
           <div style={{ background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.2)', color: '#34d399', padding: '1.25rem', borderRadius: '8px', textAlign: 'center' }}>
-            <p style={{ fontSize: '0.95rem' }}>Account created successfully. Redirecting to login...</p>
+            <p style={{ fontSize: '0.95rem' }}>Account created successfully. Taking you to your dashboard...</p>
           </div>
         ) : (
           <>

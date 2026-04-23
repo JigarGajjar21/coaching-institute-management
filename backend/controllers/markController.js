@@ -1,54 +1,38 @@
 const Mark = require('../models/Mark');
 const Test = require('../models/Test');
-const Batch = require('../models/Batch');
 
 // @desc    Record or update marks for a specific test
 // @route   POST /api/marks
 // @access  Private/Faculty
 exports.recordMarks = async (req, res) => {
   try {
-    const { testId, marksRecords } = req.body; 
+    const { testId, marksRecords } = req.body;
 
-    if (!testId || !marksRecords || !Array.isArray(marksRecords)) {
+    if (!testId || !marksRecords || !Array.isArray(marksRecords))
       return res.status(400).json({ message: 'Please provide testId and a valid marksRecords array' });
-    }
 
-    // Verify test exists and populate batch
     const test = await Test.findById(testId).populate('batchId');
-    if (!test) {
-      return res.status(404).json({ message: 'Test not found' });
-    }
+    if (!test)           return res.status(404).json({ message: 'Test not found' });
+    if (!test.batchId)   return res.status(404).json({ message: 'Associated batch not found' });
 
-    // Verify batch exists
-    const batch = test.batchId;
-    if (!batch) {
-      return res.status(404).json({ message: 'Associated batch not found' });
-    }
-
-    // Validate marks against maxMarks
-    for (let record of marksRecords) {
-      if (record.marksObtained < 0 || record.marksObtained > test.maxMarks) {
-        return res.status(400).json({ 
-          message: `Marks obtained (${record.marksObtained}) for student ${record.studentId} cannot exceed maxMarks (${test.maxMarks}) or be less than 0` 
+    for (const record of marksRecords) {
+      if (record.marksObtained < 0 || record.marksObtained > test.maxMarks)
+        return res.status(400).json({
+          message: `Marks for student ${record.studentId} must be between 0 and ${test.maxMarks}`,
         });
-      }
     }
 
-    // Process marks dynamically using Bulk operations 
     const bulkOps = marksRecords.map(record => ({
       updateOne: {
-        filter: { testId: testId, studentId: record.studentId },
+        filter: { testId, studentId: record.studentId },
         update: { $set: { marksObtained: record.marksObtained } },
-        upsert: true
-      }
+        upsert: true,
+      },
     }));
 
-    if (bulkOps.length > 0) {
-      await Mark.bulkWrite(bulkOps);
-    }
+    if (bulkOps.length) await Mark.bulkWrite(bulkOps);
 
     res.status(200).json({ message: 'Marks recorded successfully' });
-
   } catch (error) {
     res.status(500).json({ message: 'Server error', error: error.message });
   }
@@ -59,21 +43,13 @@ exports.recordMarks = async (req, res) => {
 // @access  Private/Student
 exports.getMyMarks = async (req, res) => {
   try {
-    if (req.user.role !== 'student') {
-      return res.status(403).json({ message: 'Only students can view their personal marks history' });
-    }
-
-    // Find all mark records for this student and populate the test details
     const marksHistory = await Mark.find({ studentId: req.user._id })
       .populate({
-        path: 'testId',
-        select: 'subject date maxMarks batchId',
-        populate: {
-          path: 'batchId',
-          select: 'name'
-        }
+        path:     'testId',
+        select:   'subject date maxMarks batchId',
+        populate: { path: 'batchId', select: 'name' },
       })
-      .sort({ createdAt: -1 }); // Sort by newest first
+      .sort({ createdAt: -1 });
 
     res.status(200).json(marksHistory);
   } catch (error) {
@@ -81,54 +57,47 @@ exports.getMyMarks = async (req, res) => {
   }
 };
 
-// @desc    Get all student marks for a specific test (Performance Reporting)
+// @desc    Get all student marks for a specific test
 // @route   GET /api/marks/test/:testId
 // @access  Private/Faculty or Admin
 exports.getTestMarks = async (req, res) => {
   try {
-    const { testId } = req.params;
+    const test = await Test.findById(req.params.testId).populate('batchId', 'name facultyId');
+    if (!test) return res.status(404).json({ message: 'Test not found' });
 
-    const test = await Test.findById(testId).populate('batchId', 'name facultyId');
-    if (!test) {
-      return res.status(404).json({ message: 'Test not found' });
-    }
-
-    const marks = await Mark.find({ testId })
-      .populate('studentId', 'email')
+    const marks = await Mark.find({ testId: req.params.testId })
+      .populate('studentId', 'name email')
       .sort({ marksObtained: -1 });
 
     res.status(200).json({
       testInfo: {
-        subject: test.subject,
-        date: test.date,
-        maxMarks: test.maxMarks,
-        batchName: test.batchId.name
+        subject:   test.subject,
+        date:      test.date,
+        maxMarks:  test.maxMarks,
+        batchName: test.batchId.name,
       },
-      marks
+      marks,
     });
   } catch (error) {
-    if (error.kind === 'ObjectId') {
-      return res.status(400).json({ message: 'Invalid Test ID format' });
-    }
+    if (error.kind === 'ObjectId') return res.status(400).json({ message: 'Invalid Test ID format' });
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 };
 
-// @desc    Get all marks (admin) with optional batch/student/test filter
+// @desc    Get all marks with optional batch/student/test filter
 // @route   GET /api/marks
 // @access  Private/Admin
 exports.getAllMarks = async (req, res) => {
   try {
     const { batchId, studentId, testId } = req.query;
-
     const filter = {};
 
     if (testId) {
       filter.testId = testId;
     } else if (batchId) {
-      const tests = await Test.find({ batchId }).select('_id');
+      const tests   = await Test.find({ batchId }).select('_id');
       const testIds = tests.map(t => t._id);
-      if (testIds.length === 0) return res.status(200).json([]);
+      if (!testIds.length) return res.status(200).json([]);
       filter.testId = { $in: testIds };
     }
 

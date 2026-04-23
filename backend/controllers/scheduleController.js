@@ -62,16 +62,17 @@ exports.getMySchedule = async (req, res) => {
       return res.status(403).json({ message: 'Only students can view their personal schedule' });
     }
 
-    const studentAssignment = await Student.findOne({ userId: req.user._id });
-    if (!studentAssignment) {
-      return res.status(404).json({ message: 'You have not been assigned to a batch yet' });
+    const assignments = await Student.find({ userId: req.user._id });
+    if (!assignments.length) {
+      return res.status(404).json({ message: 'You have not been assigned to any batch yet' });
     }
 
-    const schedules = await Schedule.find({ batchId: studentAssignment.batchId })
+    const batchIds = assignments.map(a => a.batchId);
+    const schedules = await Schedule.find({ batchId: { $in: batchIds } })
       .populate({ path: 'batchId', select: 'name facultyId', populate: { path: 'facultyId', select: 'name email' } })
       .sort({ day: 1, time: 1 });
 
-    res.status(200).json({ batchId: studentAssignment.batchId, schedules });
+    res.status(200).json({ batchIds, schedules });
   } catch (error) {
     res.status(500).json({ message: 'Server error', error: error.message });
   }
