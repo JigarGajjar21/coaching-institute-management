@@ -1,16 +1,17 @@
 const Batch   = require('../models/Batch');
 const User    = require('../models/User');
 const Student = require('../models/Student');
+const Course  = require('../models/Course');
 
 // @desc    Create a new batch
 // @route   POST /api/batches
 // @access  Private/Admin
 exports.createBatch = async (req, res) => {
   try {
-    const { name, facultyId } = req.body;
+    const { name, facultyId, courseId } = req.body;
 
-    if (!name || !facultyId)
-      return res.status(400).json({ message: 'Please provide name and facultyId' });
+    if (!name || !facultyId || !courseId)
+      return res.status(400).json({ message: 'Please provide name, facultyId and courseId' });
 
     const faculty = await User.findById(facultyId);
     if (!faculty)
@@ -18,10 +19,14 @@ exports.createBatch = async (req, res) => {
     if (faculty.role !== 'faculty')
       return res.status(400).json({ message: 'Assigned user is not a faculty member' });
 
+    const course = await Course.findById(courseId);
+    if (!course)
+      return res.status(400).json({ message: 'Course not found' });
+
     if (await Batch.findOne({ name }))
       return res.status(400).json({ message: 'Batch with this name already exists' });
 
-    const batch = await Batch.create({ name, facultyId });
+    const batch = await Batch.create({ name, facultyId, courseId });
     res.status(201).json({ message: 'Batch created successfully', batch });
   } catch (error) {
     res.status(500).json({ message: 'Server error', error: error.message });
@@ -82,11 +87,13 @@ exports.getBatches = async (req, res) => {
     if (role === 'admin') {
       batches = await Batch.find()
         .populate('facultyId', 'name email role')
+        .populate('courseId', 'name price duration')
         .populate({ path: 'students', populate: { path: 'userId', select: 'name email' } });
 
     } else if (role === 'faculty') {
       batches = await Batch.find({ facultyId: req.user._id })
         .populate('facultyId', 'name email role')
+        .populate('courseId', 'name price duration')
         .populate({ path: 'students', populate: { path: 'userId', select: 'name email' } });
 
     } else if (role === 'student') {
@@ -110,6 +117,7 @@ exports.getBatchDetails = async (req, res) => {
   try {
     const batch = await Batch.findById(req.params.id)
       .populate('facultyId', 'name email role')
+      .populate('courseId', 'name price duration')
       .populate({ path: 'students', populate: { path: 'userId', select: 'name email role' } });
 
     if (!batch) return res.status(404).json({ message: 'Batch not found' });
@@ -132,7 +140,7 @@ exports.updateBatch = async (req, res) => {
     const batch = await Batch.findById(req.params.id);
     if (!batch) return res.status(404).json({ message: 'Batch not found' });
 
-    const { name, facultyId } = req.body;
+    const { name, facultyId, courseId } = req.body;
 
     if (name && name !== batch.name) {
       if (await Batch.findOne({ name }))
@@ -144,6 +152,12 @@ exports.updateBatch = async (req, res) => {
       if (!faculty || faculty.role !== 'faculty')
         return res.status(400).json({ message: 'Invalid faculty user' });
       batch.facultyId = facultyId;
+    }
+    if (courseId) {
+      const course = await Course.findById(courseId);
+      if (!course)
+        return res.status(400).json({ message: 'Course not found' });
+      batch.courseId = courseId;
     }
 
     await batch.save();

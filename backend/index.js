@@ -14,6 +14,10 @@ app.use(cors({
   origin: process.env.FRONTEND_URL || 'http://localhost:5173',
   credentials: true,
 }));
+
+// Raw body for Razorpay webhook signature verification (must be before express.json())
+app.use('/api/payments/webhook', express.raw({ type: 'application/json' }));
+
 app.use(express.json());
 
 // Static uploads
@@ -21,6 +25,9 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // Routes
 app.use('/api/auth',       require('./routes/authRoutes'));
+app.use('/api/courses',      require('./routes/courseRoutes'));
+app.use('/api/enrollments',  require('./routes/enrollmentRoutes'));
+app.use('/api/payments',     require('./routes/paymentRoutes'));
 app.use('/api/batches',    require('./routes/batchRoutes'));
 app.use('/api/schedules',  require('./routes/scheduleRoutes'));
 app.use('/api/attendance', require('./routes/attendanceRoutes'));
