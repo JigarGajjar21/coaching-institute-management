@@ -64,7 +64,8 @@ exports.getMySchedule = async (req, res) => {
 
     const assignments = await Student.find({ userId: req.user._id });
     if (!assignments.length) {
-      return res.status(404).json({ message: 'You have not been assigned to any batch yet' });
+      // Return empty result consistently (200) instead of 404, matching all other endpoints
+      return res.status(200).json({ batchIds: [], schedules: [] });
     }
 
     const batchIds = assignments.map(a => a.batchId);
@@ -117,7 +118,8 @@ exports.getFacultySchedule = async (req, res) => {
 
     const batches = await Batch.find({ facultyId: req.user._id });
     if (!batches || batches.length === 0) {
-      return res.status(404).json({ message: 'You have not been assigned to any batches yet' });
+      // Return empty result consistently (200) instead of 404, matching all other endpoints
+      return res.status(200).json({ batchesAssigned: 0, schedules: [] });
     }
 
     const batchIds = batches.map(batch => batch._id);

@@ -179,7 +179,7 @@ exports.forgotPassword = async (req, res) => {
           <h2 style="color:#1e293b;margin-bottom:0.5rem;">Reset Your Password</h2>
           <p style="color:#64748b;margin-bottom:1.5rem;">
             Hi ${user.name || user.email},<br/>
-            Click the button below to reset your Vikas Computer Zone password. This link expires in <strong>10 minutes</strong>.
+            Click the button below to reset your Vikas Computer Zone password. This link expires in <strong>15 minutes</strong>.
           </p>
           <a href="${resetUrl}" style="display:inline-block;padding:0.75rem 1.5rem;background:#6366f1;color:#fff;border-radius:6px;text-decoration:none;font-weight:600;">
             Reset Password

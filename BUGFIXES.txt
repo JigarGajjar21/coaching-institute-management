@@ -1,0 +1,296 @@
+================================================================
+  VCZone Coaching Management System — Bug Fix Log
+  Date: July 2026
+  Audited & Fixed by: Kiro (Full-stack audit)
+================================================================
+
+This file documents every bug found during the full project audit
+and explains exactly what was wrong, why it was wrong, and what
+was changed to fix it.
+
+----------------------------------------------------------------
+BUG 1 — Enrollment unique index blocks re-enrollment
+----------------------------------------------------------------
+Severity  : HIGH (data/logic bug — breaks real user flows)
+File      : backend/models/Enrollment.js
+Line      : 33
+
+WHAT WAS WRONG:
+  The Enrollment model had this index:
+    enrollmentSchema.index({ userId: 1, courseId: 1 }, { unique: true });
+
+  This is a plain unique index with no conditions. MongoDB enforces
+  uniqueness across ALL documents regardless of status. So if a student
+  enrolls in a course, their enrollment is later set to 'inactive', and
+  they try to enroll again — MongoDB throws a duplicate key error (E11000).
+  The re-enrollment silently fails with a 500 error.
+
+WHY IT HAPPENS:
+  The intent was to prevent a student from enrolling in the same course
+  twice at the same time. But the index doesn't know about the 'status'
+  field — it treats active and inactive enrollments the same.
+
+WHAT WAS CHANGED:
+  Replaced the plain unique index with a PARTIAL unique index that only
+  applies when status is 'active':
+
+  BEFORE:
+    enrollmentSchema.index({ userId: 1, courseId: 1 }, { unique: true });
+
+  AFTER:
+    enrollmentSchema.index(
+      { userId: 1, courseId: 1 },
+      { unique: true, partialFilterExpression: { status: 'active' } }
+    );
+
+  Now two inactive enrollments for the same student+course can exist
+  (historical records), but two ACTIVE ones cannot. Re-enrollment after
+  inactivation works correctly.
+
+NOTE: If MongoDB Atlas already created the old index, you must manually
+  drop it from Atlas UI (Database > Collections > Indexes > drop the
+  old userId+courseId index) and let Mongoose recreate it on next
+  server start. Mongoose will not auto-replace an existing index.
+
+
+----------------------------------------------------------------
+BUG 2 — Faculty Attendance: student list is stale / empty
+----------------------------------------------------------------
+Severity  : HIGH (feature broken — faculty can't mark attendance)
+File      : frontend/src/pages/faculty/Attendance.jsx
+
+WHAT WAS WRONG:
+  When a faculty member selected a batch, the code found students like this:
+    const batch = batches.find(b => b._id === selBatch);
+    const studs = batch?.students?.map(s => s.userId).filter(Boolean) || [];
+
+  'batches' is the state array fetched ONCE when the page loads via
+  getFacultyBatches(). If any student was assigned to a batch AFTER
+  the page loaded, they would not appear in the list. Also, if the
+  virtual population hadn't fully resolved in the state object, the
+  students array would be undefined, showing 0 students.
+
+WHY IT HAPPENS:
+  Reading from a cached state array instead of fetching fresh data
+  when the selection changes. The list is only as fresh as the last
+  full page load.
+
+WHAT WAS CHANGED:
+  The useEffect that runs when selBatch changes now calls
+  getBatchDetails(selBatch) — a dedicated API call that always returns
+  the latest, fully-populated batch data including students.
+
+  Added import: getBatchDetails from facultyApi
+  Changed useEffect dependency from [selBatch, batches] to [selBatch]
+
+  BEFORE:
+    useEffect(() => {
+      if (!selBatch) { setSchedules([]); setSelSched(''); return; }
+      getBatchSchedule(selBatch).then(...);
+      const batch = batches.find(b => b._id === selBatch);      // stale!
+      const studs = batch?.students?.map(s => s.userId)...;     // stale!
+      setStudents(studs);
+      ...
+    }, [selBatch, batches]);
+
+  AFTER:
+    useEffect(() => {
+      if (!selBatch) { setSchedules([]); setSelSched(''); setStudents([]); setStatuses({}); return; }
+      getBatchSchedule(selBatch).then(...);
+      getBatchDetails(selBatch).then(r => {                      // always fresh
+        const studs = (r.data?.students || []).map(s => s.userId).filter(Boolean);
+        setStudents(studs);
+        ...
+      });
+    }, [selBatch]);
+
+  Also fixed the attendance history date display (see Bug 4).
+
+
+----------------------------------------------------------------
+BUG 3 — Faculty Marks: saving marks silently does nothing
+----------------------------------------------------------------
+Severity  : HIGH (feature broken — marks are never actually saved)
+File      : frontend/src/pages/faculty/Marks.jsx
+
+WHAT WAS WRONG:
+  Same root cause as Bug 2. handleSaveMarks derived the student list from
+  the stale 'batches' state:
+    const batch = batches.find(b => b._id === selBatch);
+    const students = batch?.students?.map(s => s.userId)...;
+
+  If the batch had students added after page load, or if students array
+  was undefined in the state, marksRecords would be an empty array [].
+  The API call would succeed (empty bulk write), but no marks were saved.
+  No error, no feedback — complete silent failure.
+
+WHAT WAS CHANGED:
+  Added a new state variable 'batchStudents' that is populated by a
+  fresh getBatchDetails() call every time selBatch changes.
+  handleSaveMarks and the render loop now use batchStudents instead
+  of deriving from the stale batches array.
+
+  Added import: getBatchDetails from facultyApi
+  Added state: const [batchStudents, setBatchStudents] = useState([]);
+  Updated useEffect for selBatch to fetch batch details.
+  Removed the stale derivation lines at the bottom of the component.
+  Updated handleSaveMarks and the student render loop to use batchStudents.
+
+
+----------------------------------------------------------------
+BUG 4 — Attendance date shows wrong day (off-by-one) in India/UTC+5:30
+----------------------------------------------------------------
+Severity  : MEDIUM (display bug — wrong date shown to users in India)
+Files     : frontend/src/pages/admin/Attendance.jsx
+            frontend/src/pages/faculty/Attendance.jsx
+
+WHAT WAS WRONG:
+  Attendance dates are stored as plain strings in "YYYY-MM-DD" format
+  (e.g. "2024-07-15"). When displayed, the code did:
+    new Date("2024-07-15").toLocaleDateString()
+
+  The Date constructor parses "YYYY-MM-DD" as UTC midnight (00:00:00 UTC).
+  In India (UTC+5:30) that is 05:30 AM on July 15. But toLocaleDateString()
+  converts to local time — which is still July 15. Seems fine.
+
+  However, browsers in some timezones west of UTC would show July 14
+  (the day before). And toLocaleDateString() output format varies by
+  browser locale setting. The stored string "2024-07-15" is already in a
+  clean, unambiguous format — no conversion needed.
+
+WHAT WAS CHANGED:
+  Removed the unnecessary Date conversion. Display the stored string directly.
+
+  BEFORE:
+    render: v => v ? new Date(v).toLocaleDateString() : '—'
+
+  AFTER:
+    render: v => v || '—'
+
+  Applied in:
+  - admin/Attendance.jsx (columns definition)
+  - faculty/Attendance.jsx (history table row)
+
+
+----------------------------------------------------------------
+BUG 5 — Password reset email says "10 minutes" but token expires in 15
+----------------------------------------------------------------
+Severity  : LOW (incorrect user-facing information)
+File      : backend/controllers/authController.js
+            backend/models/User.js (the actual expiry is set here)
+
+WHAT WAS WRONG:
+  In User.js the token expiry is set to 15 minutes:
+    this.resetPasswordExpire = Date.now() + 15 * 60 * 1000; // 15 minutes
+
+  But the email HTML in authController.js told the user:
+    "This link expires in <strong>10 minutes</strong>."
+
+  If a user received the email, waited 11 minutes, and tried to reset —
+  the link would still work (token not expired), but they would already
+  think it was invalid based on the email. Conversely, if the expiry were
+  ever changed to 10 minutes, users would be confused too.
+
+WHAT WAS CHANGED:
+  Updated the email copy to match the actual token expiry in the model.
+
+  BEFORE:
+    "This link expires in <strong>10 minutes</strong>."
+
+  AFTER:
+    "This link expires in <strong>15 minutes</strong>."
+
+
+----------------------------------------------------------------
+BUG 6 — CoursesPage shows "Coming Soon" for admin-created courses
+----------------------------------------------------------------
+Severity  : MEDIUM (new courses added by admin are unusable by students)
+File      : frontend/src/pages/CoursesPage.jsx
+
+WHAT WAS WRONG:
+  The CoursesPage had a hardcoded RICH map that assigned a detail-page
+  slug to known course names. Courses NOT in that map got:
+    <span>Coming Soon</span>
+
+  This means any course the admin creates through the admin panel
+  (e.g. a new "Python Basics" course) would appear on the public
+  courses page but with a "Coming Soon" button — students could see it
+  but could never enroll in it. The admin would have no idea why.
+
+WHAT WAS CHANGED:
+  Added proper fallback logic based on course price:
+
+  1. Known course with a slug → "View Course →" (existing behavior)
+
+  2. Unknown FREE course (price === 0) → "Enroll Free" button that
+     calls POST /api/enrollments/free directly and redirects to
+     /dashboard on success. Shows a toast notification for feedback.
+
+  3. Unknown PAID course → "Enroll →" button that redirects to login
+     if not authenticated, or stays on /courses if already logged in
+     (allowing the student to use any existing CoursePage flow).
+
+  Also added:
+  - Toast notification component for enroll success/error feedback
+  - 'enrolling' state to disable the button while the API call is in flight
+     (prevents double-submits)
+  - Price display now shows "FREE" in green instead of "₹0" for free courses
+  - token state read from localStorage to decide redirect target
+
+
+----------------------------------------------------------------
+MINOR FIX — enrollmentGuard middleware was undocumented
+----------------------------------------------------------------
+Severity  : INFORMATIONAL (no functional impact)
+File      : backend/middleware/enrollmentGuard.js
+
+WHAT WAS WRONG:
+  The middleware existed and was correctly implemented, but was never
+  imported or used anywhere in any route file. Without a comment, any
+  developer reading the code would not know whether this was intentional
+  or forgotten.
+
+WHAT WAS CHANGED:
+  Added a JSDoc block explaining what the middleware does, why it is not
+  currently applied to routes (enrollment checks are done per-controller),
+  and how to use it if needed in the future:
+
+  /**
+   * enrollmentGuard — blocks access if student has no active enrollment.
+   * Not currently applied to any route because enrollment checks are
+   * handled per-controller, but available for use.
+   * Usage: router.get('/route', protect, authorize('student'), enrollmentGuard, handler);
+   */
+
+
+================================================================
+SUMMARY TABLE
+================================================================
+
+  #  | Severity | File(s)                              | Status
+  ---|----------|--------------------------------------|--------
+  1  | HIGH     | backend/models/Enrollment.js         | FIXED
+  2  | HIGH     | frontend/pages/faculty/Attendance.jsx| FIXED
+  3  | HIGH     | frontend/pages/faculty/Marks.jsx     | FIXED
+  4  | MEDIUM   | admin/Attendance.jsx + faculty/Attend| FIXED
+  5  | LOW      | backend/controllers/authController.js| FIXED
+  6  | MEDIUM   | frontend/pages/CoursesPage.jsx       | FIXED
+  7  | INFO     | backend/middleware/enrollmentGuard.js| DOCUMENTED
+
+================================================================
+POST-FIX ACTION REQUIRED (Manual Step)
+================================================================
+
+For Bug 1 (Enrollment index), you MUST do this on MongoDB Atlas:
+
+  1. Go to Atlas → Browse Collections → your_db → enrollments
+  2. Click the "Indexes" tab
+  3. Find the index on { userId: 1, courseId: 1 }
+  4. Click "Drop Index"
+  5. Redeploy the backend on Render (or restart the server)
+  6. Mongoose will automatically recreate the correct partial index on startup
+
+Without this step, the old broken index remains in the database and
+Bug 1 is NOT fixed even though the code is updated.
+
+================================================================

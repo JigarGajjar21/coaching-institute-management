@@ -42,7 +42,7 @@ export default function Attendance() {
     { key: 'scheduleId', label: 'Batch',   render: v => v?.batchId?.name || '—', muted: true },
     { key: 'scheduleId', label: 'Subject', render: v => v?.subject || '—', muted: true },
     { key: 'scheduleId', label: 'Day',     render: v => v?.day || '—', muted: true },
-    { key: 'date',       label: 'Date',    muted: true, render: v => v ? new Date(v).toLocaleDateString() : '—' },
+    { key: 'date',       label: 'Date',    muted: true, render: v => v || '—' },
     { key: 'status',     label: 'Status',  render: v => statusBadge(v) },
   ];
 

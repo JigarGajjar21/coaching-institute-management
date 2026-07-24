@@ -36,6 +36,11 @@ const enrollmentSchema = new mongoose.Schema({
   }
 }, { timestamps: true });
 
-enrollmentSchema.index({ userId: 1, courseId: 1 }, { unique: true });
+// Partial unique index — only prevents duplicate ACTIVE enrollments for the same student+course.
+// This allows a student to re-enroll after their previous enrollment is set to 'inactive'.
+enrollmentSchema.index(
+  { userId: 1, courseId: 1 },
+  { unique: true, partialFilterExpression: { status: 'active' } }
+);
 
 module.exports = mongoose.model('Enrollment', enrollmentSchema);

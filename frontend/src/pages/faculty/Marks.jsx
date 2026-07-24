@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import FacultyLayout from '../../layouts/FacultyLayout';
-import { getFacultyBatches, getTestsByBatch, createTest, getTestMarks, recordMarks } from '../../services/facultyApi';
+import { getFacultyBatches, getTestsByBatch, createTest, getTestMarks, recordMarks, getBatchDetails } from '../../services/facultyApi';
 
 const ACCENT = '#A78BFA';
 
@@ -14,6 +14,8 @@ export default function FacultyMarks() {
   const [scores,    setScores]    = useState({});
   const [saving,    setSaving]    = useState(false);
   const [toast,     setToast]     = useState('');
+  // Fresh student list fetched directly from batch details — never reads stale batches state
+  const [batchStudents, setBatchStudents] = useState([]);
 
   // New test form
   const [newTest, setNewTest] = useState({ subject:'', date:'', maxMarks:'' });
@@ -24,8 +26,12 @@ export default function FacultyMarks() {
   }, []);
 
   useEffect(() => {
-    if (!selBatch) { setTests([]); setSelTest(''); setTestMarks(null); return; }
+    if (!selBatch) { setTests([]); setSelTest(''); setTestMarks(null); setBatchStudents([]); return; }
     getTestsByBatch(selBatch).then(r => setTests(r.data || [])).catch(console.error);
+    // Always do a fresh fetch so students added after page load are included
+    getBatchDetails(selBatch)
+      .then(r => setBatchStudents((r.data?.students || []).map(s => s.userId).filter(Boolean)))
+      .catch(console.error);
     setSelTest(''); setTestMarks(null);
   }, [selBatch]);
 
@@ -59,14 +65,12 @@ export default function FacultyMarks() {
 
   const handleSaveMarks = async () => {
     if (!selTest || !testMarks) return;
-    const batch = batches.find(b => b._id === selBatch);
-    const students = batch?.students?.map(s => s.userId).filter(Boolean) || [];
-    if (students.length === 0) { setToast('No students in this batch.'); return; }
+    if (batchStudents.length === 0) { setToast('No students in this batch.'); return; }
     setSaving(true);
     try {
       await recordMarks({
         testId: selTest,
-        marksRecords: students.map(s => ({ studentId: s._id, marksObtained: Number(scores[s._id] || 0) })),
+        marksRecords: batchStudents.map(s => ({ studentId: s._id, marksObtained: Number(scores[s._id] || 0) })),
       });
       setToast('Marks saved successfully!');
       getTestMarks(selTest).then(r => setTestMarks(r.data)).catch(console.error);
@@ -80,8 +84,7 @@ export default function FacultyMarks() {
 
   const inputStyle = { padding:'8px 12px', background:'#0F0F14', border:'1px solid rgba(255,255,255,0.1)', borderRadius:8, color:'#fff', fontSize:'0.85rem', outline:'none', fontFamily:'Inter, sans-serif', width:'100%' };
 
-  const batch = batches.find(b => b._id === selBatch);
-  const students = batch?.students?.map(s => s.userId).filter(Boolean) || [];
+  // batchStudents is always fresh (fetched on batch select) — used for both saving and rendering
 
   return (
     <FacultyLayout>
@@ -171,9 +174,9 @@ export default function FacultyMarks() {
                   fontWeight:600, fontSize:'0.82rem', opacity: saving ? 0.6 : 1, fontFamily:'Inter, sans-serif',
                 }}>{saving ? 'Saving…' : 'Save Marks'}</button>
               </div>
-              {students.length === 0 ? (
+              {batchStudents.length === 0 ? (
                 <div style={{ padding:40, textAlign:'center', color:'#52525B' }}>No students in this batch.</div>
-              ) : students.map(s => {
+              ) : batchStudents.map(s => {
                 const max = testMarks?.testInfo?.maxMarks || 100;
                 const val = scores[s._id] ?? '';
                 const pct = val !== '' ? Math.round((Number(val) / max) * 100) : null;

@@ -14,20 +14,22 @@ const RICH = {
   '2D Animation':                      { slug:'2d-animation',  icon:'🎬', accent:'#f59e0b', glow:'rgba(245,158,11,0.15)',  tag:'New', tagColor:'#f59e0b' },
 };
 
-/* Fallback for courses not in RICH map */
+/* Fallback for courses not in RICH map — uses generic icon/colors, no dedicated detail page */
 const FALLBACK = { slug: null, icon: '📚', accent: '#22D3A5', glow: 'rgba(34,211,165,0.15)' };
 
 export default function CoursesPage() {
   const navigate = useNavigate();
-  const [courses, setCourses]   = useState([]);
-  const [loading, setLoading]   = useState(true);
-  const [scrolled, setScrolled] = useState(false);
-  const user = JSON.parse(localStorage.getItem('user') || '{}');
+  const [courses, setCourses]     = useState([]);
+  const [loading, setLoading]     = useState(true);
+  const [scrolled, setScrolled]   = useState(false);
+  const [enrolling, setEnrolling] = useState(null); // courseId currently being enrolled
+  const [toast, setToast]         = useState('');
+  const user  = JSON.parse(localStorage.getItem('user') || '{}');
+  const token = localStorage.getItem('token');
 
   useEffect(() => {
     const fn = () => setScrolled(window.scrollY > 20);
     window.addEventListener('scroll', fn);
-    // Fetch live courses from backend
     api.get('/courses')
       .then(r => setCourses(r.data?.data || r.data || []))
       .catch(console.error)
@@ -41,8 +43,40 @@ export default function CoursesPage() {
     navigate('/login');
   };
 
+  const showToast = (msg, success = false) => {
+    setToast({ msg, success });
+    setTimeout(() => setToast(''), 3500);
+  };
+
+  // Used for free courses that have no dedicated detail/slug page
+  const handleDirectEnroll = async (courseId) => {
+    if (!token) { navigate('/login', { state: { redirect: '/courses' } }); return; }
+    if (enrolling) return;
+    setEnrolling(courseId);
+    try {
+      await api.post('/enrollments/free', { courseId });
+      showToast('Enrolled successfully! Redirecting…', true);
+      setTimeout(() => navigate('/dashboard'), 1500);
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Enrollment failed.');
+    } finally {
+      setEnrolling(null);
+    }
+  };
+
   return (
     <div style={{ minHeight:'100vh', background:'#0B0B0F', fontFamily:'Inter, sans-serif', color:'#fff' }}>
+      {/* Toast notification */}
+      {toast && (
+        <div style={{
+          position:'fixed', top:20, right:20, zIndex:9999,
+          padding:'12px 20px', borderRadius:10,
+          background: toast.success ? 'rgba(34,211,165,0.15)' : 'rgba(239,68,68,0.15)',
+          border: `1px solid ${toast.success ? 'rgba(34,211,165,0.35)' : 'rgba(239,68,68,0.35)'}`,
+          color: toast.success ? '#22D3A5' : '#f87171',
+          fontSize:'0.875rem', fontWeight:600, boxShadow:'0 8px 32px rgba(0,0,0,0.5)',
+        }}>{toast.msg}</div>
+      )}
       {/* Navbar */}
       <nav style={{
         position:'fixed', top:0, left:0, right:0, zIndex:100, height:64,
@@ -128,15 +162,29 @@ export default function CoursesPage() {
                   <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', paddingTop:16, borderTop:'1px solid rgba(255,255,255,0.06)' }}>
                     <div>
                       <div style={{ fontSize:'0.7rem', color:'#52525B', marginBottom:2 }}>Course Fee</div>
-                      <div style={{ fontSize:'1.3rem', fontWeight:800, color:accent }}>₹{c.price?.toLocaleString()}</div>
+                      <div style={{ fontSize:'1.3rem', fontWeight:800, color:accent }}>
+                        {c.price === 0 ? 'FREE' : `₹${c.price?.toLocaleString()}`}
+                      </div>
                     </div>
                     {target ? (
+                      /* Known course — go to dedicated detail page */
                       <Link to={target} style={{ padding:'8px 18px', borderRadius:8, fontSize:'0.82rem', fontWeight:600, background:glow, border:`1px solid ${accent}30`, color:accent, textDecoration:'none', transition:'all 0.2s' }}
                         onMouseOver={e => e.currentTarget.style.background=`${accent}25`}
                         onMouseOut={e  => e.currentTarget.style.background=glow}
                       >View Course →</Link>
+                    ) : c.price === 0 ? (
+                      /* Unmapped free course — enroll directly without a detail page */
+                      <button
+                        onClick={() => handleDirectEnroll(c._id)}
+                        disabled={enrolling === c._id}
+                        style={{ padding:'8px 18px', borderRadius:8, fontSize:'0.82rem', fontWeight:600, background: enrolling === c._id ? 'rgba(34,211,165,0.06)' : glow, border:`1px solid ${accent}30`, color:accent, cursor: enrolling === c._id ? 'not-allowed' : 'pointer', transition:'all 0.2s', fontFamily:'Inter, sans-serif', opacity: enrolling === c._id ? 0.6 : 1 }}
+                      >{enrolling === c._id ? 'Enrolling…' : 'Enroll Free'}</button>
                     ) : (
-                      <span style={{ padding:'8px 18px', borderRadius:8, fontSize:'0.82rem', fontWeight:600, background:'rgba(255,255,255,0.04)', border:'1px solid rgba(255,255,255,0.08)', color:'#52525B' }}>Coming Soon</span>
+                      /* Unmapped paid course — redirect to login first, then let CoursePage handle Razorpay */
+                      <button
+                        onClick={() => token ? navigate('/login') : navigate('/login', { state: { redirect: '/courses' } })}
+                        style={{ padding:'8px 18px', borderRadius:8, fontSize:'0.82rem', fontWeight:600, background:glow, border:`1px solid ${accent}30`, color:accent, cursor:'pointer', transition:'all 0.2s', fontFamily:'Inter, sans-serif' }}
+                      >Enroll →</button>
                     )}
                   </div>
                 </div>

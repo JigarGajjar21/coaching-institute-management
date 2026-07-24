@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import FacultyLayout from '../../layouts/FacultyLayout';
-import { getFacultyBatches, getBatchSchedule, getBatchAttendance, markAttendance } from '../../services/facultyApi';
+import { getFacultyBatches, getBatchSchedule, getBatchAttendance, markAttendance, getBatchDetails } from '../../services/facultyApi';
 
 const ACCENT = '#A78BFA';
 
@@ -24,19 +24,22 @@ export default function FacultyAttendance() {
   }, []);
 
   useEffect(() => {
-    if (!selBatch) { setSchedules([]); setSelSched(''); return; }
-    getBatchSchedule(selBatch).then(r => {
-      setSchedules(r.data || []);
-      setSelSched('');
-    }).catch(console.error);
-    // load students from selected batch
-    const batch = batches.find(b => b._id === selBatch);
-    const studs = batch?.students?.map(s => s.userId).filter(Boolean) || [];
-    setStudents(studs);
-    const init = {};
-    studs.forEach(s => { init[s._id] = 'Present'; });
-    setStatuses(init);
-  }, [selBatch, batches]);
+    if (!selBatch) { setSchedules([]); setSelSched(''); setStudents([]); setStatuses({}); return; }
+    // Fetch schedules for the selected batch
+    getBatchSchedule(selBatch)
+      .then(r => { setSchedules(r.data || []); setSelSched(''); })
+      .catch(console.error);
+    // Always do a fresh fetch of batch details so student list is never stale
+    getBatchDetails(selBatch)
+      .then(r => {
+        const studs = (r.data?.students || []).map(s => s.userId).filter(Boolean);
+        setStudents(studs);
+        const init = {};
+        studs.forEach(s => { init[s._id] = 'Present'; });
+        setStatuses(init);
+      })
+      .catch(console.error);
+  }, [selBatch]);
 
   const handleSubmit = async () => {
     if (!selSched || !date || students.length === 0) {
@@ -187,7 +190,7 @@ export default function FacultyAttendance() {
                     onMouseOver={e => e.currentTarget.style.background='rgba(255,255,255,0.02)'}
                     onMouseOut={e => e.currentTarget.style.background='transparent'}
                   >
-                    <td style={{ padding:'12px 20px', color:'#fff', fontWeight:500 }}>{r.date ? new Date(r.date).toLocaleDateString() : '—'}</td>
+                    <td style={{ padding:'12px 20px', color:'#fff', fontWeight:500 }}>{r.date || '—'}</td>
                     <td style={{ padding:'12px 20px', color:'#A1A1AA' }}>{r.studentId?.name || '—'}</td>
                     <td style={{ padding:'12px 20px', color:'#A1A1AA' }}>{r.scheduleId?.subject || '—'}</td>
                     <td style={{ padding:'12px 20px', color:'#71717A' }}>{r.scheduleId?.batchId?.name || '—'}</td>
