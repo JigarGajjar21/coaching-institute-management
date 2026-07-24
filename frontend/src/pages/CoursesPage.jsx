@@ -64,6 +64,48 @@ export default function CoursesPage() {
     }
   };
 
+  // Used for paid courses that have no dedicated detail/slug page — opens Razorpay inline
+  const handlePaidEnroll = async (course) => {
+    if (!token) { navigate('/login', { state: { redirect: '/courses' } }); return; }
+    if (enrolling) return;
+    setEnrolling(course._id);
+    try {
+      // Create Razorpay order
+      const { data } = await api.post('/payments/create-order', { courseId: course._id });
+      const options = {
+        key:          data.key,
+        amount:       data.amount,
+        currency:     data.currency,
+        name:         'VCZone',
+        description:  course.name,
+        order_id:     data.orderId,
+        handler: async (response) => {
+          try {
+            await api.post('/payments/verify', {
+              razorpay_order_id:   response.razorpay_order_id,
+              razorpay_payment_id: response.razorpay_payment_id,
+              razorpay_signature:  response.razorpay_signature,
+              courseId:            course._id,
+            });
+            showToast('Payment successful! Enrolled. Redirecting…', true);
+            setTimeout(() => navigate('/dashboard'), 1500);
+          } catch (err) {
+            showToast(err.response?.data?.message || 'Payment verification failed.');
+          }
+        },
+        prefill: { name: user.name || '', email: user.email || '' },
+        theme: { color: '#22D3A5' },
+      };
+      const rzp = new window.Razorpay(options);
+      rzp.on('payment.failed', () => showToast('Payment failed. Please try again.'));
+      rzp.open();
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Could not initiate payment.');
+    } finally {
+      setEnrolling(null);
+    }
+  };
+
   return (
     <div style={{ minHeight:'100vh', background:'#0B0B0F', fontFamily:'Inter, sans-serif', color:'#fff' }}>
       {/* Toast notification */}
@@ -180,11 +222,12 @@ export default function CoursesPage() {
                         style={{ padding:'8px 18px', borderRadius:8, fontSize:'0.82rem', fontWeight:600, background: enrolling === c._id ? 'rgba(34,211,165,0.06)' : glow, border:`1px solid ${accent}30`, color:accent, cursor: enrolling === c._id ? 'not-allowed' : 'pointer', transition:'all 0.2s', fontFamily:'Inter, sans-serif', opacity: enrolling === c._id ? 0.6 : 1 }}
                       >{enrolling === c._id ? 'Enrolling…' : 'Enroll Free'}</button>
                     ) : (
-                      /* Unmapped paid course — redirect to login first, then let CoursePage handle Razorpay */
+                      /* Unmapped paid course — trigger Razorpay directly (or redirect to login if not authenticated) */
                       <button
-                        onClick={() => token ? navigate('/login') : navigate('/login', { state: { redirect: '/courses' } })}
-                        style={{ padding:'8px 18px', borderRadius:8, fontSize:'0.82rem', fontWeight:600, background:glow, border:`1px solid ${accent}30`, color:accent, cursor:'pointer', transition:'all 0.2s', fontFamily:'Inter, sans-serif' }}
-                      >Enroll →</button>
+                        onClick={() => handlePaidEnroll(c)}
+                        disabled={enrolling === c._id}
+                        style={{ padding:'8px 18px', borderRadius:8, fontSize:'0.82rem', fontWeight:600, background: enrolling === c._id ? 'rgba(34,211,165,0.06)' : glow, border:`1px solid ${accent}30`, color:accent, cursor: enrolling === c._id ? 'not-allowed' : 'pointer', transition:'all 0.2s', fontFamily:'Inter, sans-serif', opacity: enrolling === c._id ? 0.6 : 1 }}
+                      >{enrolling === c._id ? 'Processing…' : 'Enroll →'}</button>
                     )}
                   </div>
                 </div>
